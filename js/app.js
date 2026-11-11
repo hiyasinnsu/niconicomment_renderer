@@ -390,9 +390,14 @@ async function startExport() {
   const bitrate = settings.bitrate > 0 ? settings.bitrate * 1e6 : autoBitrate(geometry, fps);
   const durationSec = video.duration;
   const useWebCodecs = settings.exportMode === "webcodecs" && supportsWebCodecs();
-  // 書き出し用の描画は解像度が違うので、プレビュー用とは別の画像キャッシュを使う
+  // 書き出し用の描画は解像度が違うので、プレビュー用とは別の画像キャッシュを使う。
+  // 書き出し中に設定を動かしても出力が途中で変わらないよう、開始時の状態を使う。
   const exportPainter = new CommentPainter();
-  const renderForExport = (ctx, tMs) => (layout ? exportPainter.draw(ctx, layout, tMs, geometry.stage, drawStyle()) : 0);
+  const exportLayout = layout;
+  const exportStyle = drawStyle();
+  const opacity = settings.opacity / 100;
+  const includeAudio = settings.includeAudio;
+  const renderForExport = (ctx, tMs) => (exportLayout ? exportPainter.draw(ctx, exportLayout, tMs, geometry.stage, exportStyle) : 0);
 
   let writable = null;
   const ext = useWebCodecs ? "mp4" : (MediaRecorder.isTypeSupported?.("video/mp4") ? "mp4" : "webm");
@@ -430,9 +435,9 @@ async function startExport() {
         video: exportVideo,
         file: videoFile ?? (await (await fetch(videoUrl)).blob()),
         geometry, fps, durationSec, bitrate,
-        includeAudio: settings.includeAudio,
+        includeAudio,
         renderComments: renderForExport,
-        opacity: settings.opacity / 100,
+        opacity,
         signal: exportController.signal,
         writable,
         log,
@@ -445,9 +450,9 @@ async function startExport() {
     } else {
       result = await exportWithRecorder({
         videoUrl, geometry, fps, durationSec, bitrate,
-        includeAudio: settings.includeAudio,
+        includeAudio,
         renderComments: renderForExport,
-        opacity: settings.opacity / 100,
+        opacity,
         signal: exportController.signal,
         log,
         onProgress: (p) => {
@@ -468,7 +473,6 @@ async function startExport() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 60000);
       log(`完了しました（${sec}秒、${(result.blob.size / 1048576).toFixed(1)}MB）。`);
-      window.__lastExport = result.blob;
     }
     $("exportProgress").value = 1;
   } catch (e) {

@@ -474,26 +474,26 @@ export async function exportWithRecorder(o) {
   recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   const stopped = new Promise((r) => { recorder.onstop = r; });
 
-  let running = true;
-  const draw = () => {
-    if (!running) return;
+  // 描画のきっかけはWorkerのタイマーにする（requestAnimationFrame は非表示のタブで止まるため）
+  log("録画中はこのタブを表示したままにしてください。");
+  const ticker = new Worker(URL.createObjectURL(new Blob(
+    ["let id;onmessage=(e)=>{clearInterval(id);if(e.data>0)id=setInterval(()=>postMessage(0),e.data);};"],
+    { type: "text/javascript" },
+  )));
+  let finish;
+  const finished = new Promise((resolve) => { finish = resolve; });
+  ticker.onmessage = () => {
     compositeFrame(ctx, video, geometry, (c) => renderComments(c, video.currentTime * 1000), commentCanvas, opacity);
     onProgress?.(Math.min(1, video.currentTime / durationSec));
-    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(draw);
-    else requestAnimationFrame(draw);
+    if (signal?.aborted || video.ended || video.currentTime >= durationSec) finish();
   };
   compositeFrame(ctx, video, geometry, (c) => renderComments(c, 0), commentCanvas, opacity);
   recorder.start(1000);
   await video.play();
-  draw();
-  await new Promise((resolve) => {
-    const tick = () => {
-      if (signal?.aborted || video.ended || video.currentTime >= durationSec) resolve();
-      else setTimeout(tick, 100);
-    };
-    tick();
-  });
-  running = false;
+  ticker.postMessage(1000 / fps);
+  video.addEventListener("ended", () => finish(), { once: true });
+  await finished;
+  ticker.terminate();
   video.pause();
   recorder.stop();
   await stopped;
