@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ニコニコメント合成</title>
+<meta name="description" content="コメント増量で保存したニコニコ動画のコメントJSONを、手元の動画に合成して書き出すブラウザアプリ">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23252525'/%3E%3Cpath d='M6 11h20M4 17h16M9 23h18' stroke='%23fff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <h1>ニコニコメント合成</h1>
+  <p class="lead">コメント増量で保存したコメント(JSON / XML)を手元の動画に重ねてプレビューし、MP4に書き出します。ファイルはブラウザ内だけで処理され、外部には送信されません。</p>
+</header>
+
+<main class="layout">
+  <section class="player-col">
+    <div class="files">
+      <label class="file-pick" id="videoPick">
+        <input type="file" id="videoInput" accept="video/*,.mkv,.mov">
+        <span class="file-title">動画ファイル</span>
+        <span class="file-name" id="videoName">未選択（ドラッグ＆ドロップも可）</span>
+      </label>
+      <label class="file-pick" id="commentPick">
+        <input type="file" id="commentInput" accept=".json,.xml,application/json,text/xml" multiple>
+        <span class="file-title">コメントファイル</span>
+        <span class="file-name" id="commentName">未選択（複数可）</span>
+      </label>
+    </div>
+
+    <div class="stage-wrap">
+      <div class="stage" id="stage">
+        <video id="video" playsinline preload="auto"></video>
+        <canvas id="overlay"></canvas>
+        <div class="stage-empty" id="stageEmpty">動画とコメントファイルを選ぶとここにプレビューが表示されます</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button type="button" id="playBtn" class="icon-btn" aria-label="再生" disabled>
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path id="playIcon" d="M7 4l13 8-13 8z" fill="currentColor"/></svg>
+      </button>
+      <span class="time" id="timeLabel">0:00 / 0:00</span>
+      <input type="range" id="seek" min="0" max="1000" value="0" step="1" aria-label="再生位置" disabled>
+      <input type="range" id="volume" min="0" max="1" value="0.8" step="0.05" aria-label="音量" class="vol">
+      <button type="button" id="fullBtn" class="icon-btn" aria-label="全画面">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+    <p class="status" id="status" role="status"></p>
+  </section>
+
+  <aside class="settings">
+    <details open>
+      <summary>表示</summary>
+      <div class="field range">
+        <label for="fontScale">コメントの大きさ <output data-for="fontScale"></output>%</label>
+        <input type="range" id="fontScale" min="50" max="150" step="5">
+      </div>
+      <div class="field range">
+        <label for="strokeAlpha">縁取りの濃さ <output data-for="strokeAlpha"></output></label>
+        <input type="range" id="strokeAlpha" min="0" max="1" step="0.05">
+      </div>
+      <div class="field range">
+        <label for="strokeThickness">縁取りの太さ <output data-for="strokeThickness"></output></label>
+        <input type="range" id="strokeThickness" min="0" max="8" step="0.1">
+      </div>
+      <div class="field range">
+        <label for="opacity">不透明度 <output data-for="opacity"></output>%</label>
+        <input type="range" id="opacity" min="0" max="100" step="5">
+      </div>
+      <div class="field range">
+        <label for="fps">フレームレート <output data-for="fps"></output>fps</label>
+        <input type="range" id="fps" min="1" max="120" step="1">
+      </div>
+      <div class="field">
+        <label for="font">フォント</label>
+        <select id="font">
+          <option value="default">標準（公式と同じ、OS別）</option>
+          <option value="meiryo">メイリオ</option>
+          <option value="custom">指定する</option>
+        </select>
+        <input type="text" id="customFont" placeholder='例: "BIZ UDPGothic", sans-serif' hidden>
+      </div>
+      <label class="check"><input type="checkbox" id="keepCA"> コメントアートが崩れないようにする</label>
+      <label class="check"><input type="checkbox" id="showCount"> コメント描画数を表示</label>
+    </details>
+
+    <details open>
+      <summary>配置とタイミング</summary>
+      <div class="field">
+        <label for="stageAspect">コメントの描画範囲</label>
+        <select id="stageAspect">
+          <option value="16:9">16:9（ニコニコと同じ。動画は中央に収める）</option>
+          <option value="video">動画の縦横比に合わせる</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="slotLimit">同時に表示するコメント数の上限（レイヤーごと）</label>
+        <select id="slotLimit">
+          <option value="0">無制限（コメント増量向け）</option>
+          <option value="40">40（ニコニコ公式と同じ）</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="offsetSec">タイミング補正（秒、＋で遅らせる）</label>
+        <input type="number" id="offsetSec" step="0.1">
+      </div>
+      <label class="check"><input type="checkbox" id="showOwner"> 投稿者コメントを表示</label>
+      <label class="check"><input type="checkbox" id="hideNicoscript"> 投稿者のニコスクリプト（＠で始まる）を隠す</label>
+    </details>
+
+    <details>
+      <summary>NG・絞り込み</summary>
+      <div class="field">
+        <label for="ngScore">NG共有レベル</label>
+        <select id="ngScore">
+          <option value="none">無</option>
+          <option value="weak">弱</option>
+          <option value="medium">中</option>
+          <option value="strong">強</option>
+          <option value="strongest">最強（スコア0未満すべて）</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="nicoruMin">ニコられ数がこれ以上のコメントだけ表示</label>
+        <input type="number" id="nicoruMin" min="0" step="1">
+      </div>
+      <label class="check"><input type="checkbox" id="premiumOnly"> プレミアム会員のコメントだけ表示</label>
+      <label class="check"><input type="checkbox" id="hideEasy"> かんたんコメントを表示しない</label>
+      <div class="field">
+        <label for="ngWords">NGワード（1行に1つ。含むコメントを隠す）</label>
+        <textarea id="ngWords" rows="3"></textarea>
+      </div>
+      <div class="field">
+        <label for="ngCommands">NGコマンド（1行に1つ。空白区切りはすべて含む場合）</label>
+        <textarea id="ngCommands" rows="3" placeholder="例: big red"></textarea>
+      </div>
+    </details>
+
+    <details open>
+      <summary>書き出し</summary>
+      <div class="field">
+        <label for="outHeight">解像度（高さ）</label>
+        <select id="outHeight">
+          <option value="source">元の動画に合わせる</option>
+          <option value="720">720p</option>
+          <option value="1080">1080p</option>
+          <option value="1440">1440p</option>
+          <option value="2160">2160p</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="bitrate">映像ビットレート（Mbps、0で自動）</label>
+        <input type="number" id="bitrate" min="0" step="1">
+      </div>
+      <div class="field">
+        <label for="exportMode">方式</label>
+        <select id="exportMode">
+          <option value="webcodecs">高速（WebCodecs・MP4）</option>
+          <option value="recorder">再生しながら録画（動画と同じ時間がかかる）</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="includeAudio"> 音声を含める</label>
+      <p class="hint" id="exportInfo"></p>
+      <div class="export-actions">
+        <button type="button" id="exportBtn" class="primary" disabled>書き出す</button>
+        <button type="button" id="cancelBtn" hidden>中止</button>
+      </div>
+      <progress id="exportProgress" max="1" value="0" hidden></progress>
+      <p class="log" id="exportLog"></p>
+    </details>
+
+    <button type="button" id="resetBtn" class="link-btn">設定を初期値に戻す</button>
+  </aside>
+</main>
+
+<footer class="foot">
+  <p>コメントの配置・速度・文字サイズ・縁取りは、ニコニコ動画の視聴ページが使う公式コメント描画処理の規則に合わせています。書き出しには Chrome / Edge を推奨します。</p>
+  <p><a href="https://github.com/hiyasinnsu/niconicomment_renderer">ソースコード</a></p>
+</footer>
+
+<script src="lib/mp4box.all.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
