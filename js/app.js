@@ -330,7 +330,7 @@ function updateTimeUi() {
   const d = video.duration || 0;
   $("timeLabel").textContent = `${fmtTime(video.currentTime)} / ${fmtTime(d)}`;
   if (!seeking) $("seek").value = d ? String(Math.round((video.currentTime / d) * 1000)) : "0";
-  $("playIcon").setAttribute("d", video.paused ? "M7 4l13 8-13 8z" : "M6 4h4v16H6zM14 4h4v16h-4z");
+  $("playIcon").setAttribute("d", video.paused ? "M6 4l13 8-13 8z" : "M6 4h4v16H6zM14 4h4v16h-4z");
   $("playBtn").setAttribute("aria-label", video.paused ? "再生" : "一時停止");
 }
 let seeking = false;
@@ -351,7 +351,13 @@ $("fullBtn").addEventListener("click", () => {
   if (document.fullscreenElement) document.exitFullscreen();
   else stage.requestFullscreen?.().catch(() => {});
 });
-stage.addEventListener("click", togglePlay);
+stage.addEventListener("click", () => {
+  if (video.readyState < 1) {
+    $("videoInput").click();
+    return;
+  }
+  togglePlay();
+});
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input, textarea, select, button")) return;
   if (e.code === "Space") { e.preventDefault(); togglePlay(); }
